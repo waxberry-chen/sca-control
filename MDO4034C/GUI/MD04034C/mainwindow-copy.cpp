@@ -7,13 +7,15 @@
 #include<QTime>
 #include<QDate>
 #include <windows.h>
+#include <cstdlib>
+#include <ctime>
 char Time[] = "HORIZONTAL:SCALE 4E-5";                   //时间40us
 char Trig_Source[] ="TRIGger:A:EDGE:SOUrce CH1";         //触发源CH1
 char Trig_Vol[]    = "TRIGger:A:LEVel:CH1 1.4";          //触发电平
 char Trig_Mode[]   = "TRIGger:A:EDGE:SLOpe RISe";        //触发方式 rise  fAll
 char Read_CH[] = "DATa:SOUrce CH2";                  //读取通道
 char Data_Start[] = "DATa:START 90000";                  //start 100k - 10k
-char Data_Stop [32] = "DATa:STOP 430000";                //Stop 100k + 330k
+char Data_Stop [32]                                                                                                                   = "DATa:STOP 430000";                //Stop 100k + 330k
 char Data_Mode[]  = "DATa:ENCdg RPBinary";           //无符号数
 
 char PWM4_Time[] ="HORIZONTAL:SCALE 4E-7";                   //时间400ns
@@ -62,6 +64,7 @@ char Dili_NTT_TVLA_Trig_Mode[]   = "TRIGger:A:EDGE:SLOpe fAll";        //触发�
 char Dili_NTT_TVLA_Data_Start[32] =   "DATa:START 100000";              //start 100k
 char Dili_NTT_TVLA_Data_Stop [32] = "DATa:STOP 600000";                 //Stop 600k
 const int Dili_NTT_Sample_cnt = 500000;
+const int NTT_Pipeline_capture_count = 5;  // NTT Pipeline取均值的分母
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -96,6 +99,10 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+/******************************
+ * TEST FUNCTION 1: 
+ *      Dili_NTT_TVLA_Attack
+******************************/
 void MainWindow:: Dili_NTT_TVLA_Attack()
 {
     qDebug()<<"新客户段连接";
@@ -227,9 +234,10 @@ void MainWindow:: Dili_NTT_TVLA_Attack()
     qDebug()<<"over";
 }
 
-
-
-
+/******************************
+ * TEST FUNCTION 2: 
+ *      NTT_TVLA_Attack
+******************************/
 void MainWindow:: NTT_TVLA_Attack()
 {
     qDebug()<<"新客户段连接";
@@ -358,7 +366,10 @@ void MainWindow:: NTT_TVLA_Attack()
 }
 
 
-
+/******************************
+ * TEST FUNCTION 3: 
+ *      NTT_Pipeline_Attack
+******************************/
 void MainWindow:: NTT_Pipeline_Attack()
 {
     qDebug()<<"新客户段连接";
@@ -376,7 +387,7 @@ void MainWindow:: NTT_Pipeline_Attack()
     int32_t * Data_Sum        = new int32_t[5000];
     int Busy_cnt;
     int Data_locate;
-    QFile f("D:\\htz3.txt");
+
 
     //******************** MDO配置 ************************//
     ViSession	rm = VI_NULL,vi = VI_NULL;
@@ -411,98 +422,106 @@ void MainWindow:: NTT_Pipeline_Attack()
 
     QString a_Qstr;
     char u_str[10];
-    for(int i=0;i<0x7fffffff;i++)
+    const int fixed_b = 666;  // 固定的b值, ONLY DISPLAY
+    for (int loop = 0; loop < 10 ; loop++) {
+        QString filename = "D:\\ntt_pipeline_traces-loop"+QString::number(loop)+".txt" ;
+
+    // 打开文件用于写入所有曲线
+    QFile f(filename);
+    if(!f.open(QIODevice::WriteOnly | QIODevice::Text))
     {
-        for(int j=0;j<500;j++)
+        qDebug() << ("打开文件失败");
+        return;
+    }
+    QTextStream txtOutput(&f);
+    
+    // 采集4096条曲线，a值从0到4095
+    for(int a_value = 0; a_value < 3329; a_value++)
+    {
+
+        //清空Data_sum
+        for(int k=0;k<5000;k++) Data_Sum[k] = 0;
+        
+        //测试循环 - 对同一个a值采集多次取平均
+        for(int k=0;k<NTT_Pipeline_capture_count;k++)
         {
-            QString filename = "D:\\cym\\";
-            filename.append(QString::number((i-2 +3329)%3329,10));
-            filename.append("-");
-            filename.append(QString::number((j-2 + 3329)%3329,10));
-            filename.append(".txt");
-            f.setFileName(filename);
-            if(!f.open(QIODevice::WriteOnly | QIODevice::Text))
+            viWrite(vi, (ViBuf) "ACQUIRE:STOPAFTER SEQUENCE", 26, &retCnt);  //Single
+            BUSY[0] = '0';
+            while(BUSY[0] != '1')
             {
-                qDebug() << ("打开文件失败");
+                viWrite(vi, (ViBuf) "BUSY?", 5, &retCnt);  //等待
+                viRead(vi, (ViBuf) BUSY, sizeof(BUSY), &retCnt);
+                Sleep(10);
             }
-            QTextStream txtOutput(&f);
-
-            //清空Data_sum
-            for(int k=0;k<5000;k++) Data_Sum[k] = 0;
-            //测试循环
-            for(int k=0;k<NTT_Pipeline_capture_count;k++)
+            BUSY[0] = '0';
+            while(BUSY[0] != '1')
             {
-                viWrite(vi, (ViBuf) "ACQUIRE:STOPAFTER SEQUENCE", 26, &retCnt);  //Single
-                BUSY[0] = '0';
-                while(BUSY[0] != '1')
-                {
-                    viWrite(vi, (ViBuf) "BUSY?", 5, &retCnt);  //等待
-                    viRead(vi, (ViBuf) BUSY, sizeof(BUSY), &retCnt);
-                    Sleep(10);
-                }
-                BUSY[0] = '0';
-                while(BUSY[0] != '1')
-                {
-                    viWrite(vi, (ViBuf) "BUSY?", 5, &retCnt);  //等待
-                    viRead(vi, (ViBuf) BUSY, sizeof(BUSY), &retCnt);
-                    Sleep(10);
-                }
-
-                Sleep(100);
-
-
-                a_Qstr = QString::number(5*i+j,10);
-                //b_Qstr = QString::number((j-2)%3329,10);
-                strcpy(u_str,a_Qstr.toLatin1().data());
-            //strcpy(u_str,b_Qstr.toLatin1().data());
-            send:
-                mSocket->write("NTT_Pipe");
-                mSocket->write(u_str);
-                mSocket->waitForBytesWritten();
-                //WAIT
-                //BUSY[0] = '1';
-                Busy_cnt = 0;
-                while(BUSY[0] != '0')
-                {
-                    viWrite(vi, (ViBuf) "BUSY?", 5, &retCnt);  //等待
-                    viRead(vi, (ViBuf) BUSY, sizeof(BUSY), &retCnt);
-                    Sleep(10);
-                    Busy_cnt ++;
-                    if(Busy_cnt == 100) goto send;
-                }
-                viWrite(vi, (ViBuf) "ACQUIRE:STOPAFTER RUNSTop", 25, &retCnt);  //runstop
-
-                //读取数据
-                viWrite(vi, (ViBuf) "CURVE?", 6, &retCnt);  //获取数据
-                viFlush(vi, VI_WRITE_BUF | VI_READ_BUF_DISCARD);
-                viSetAttribute(vi,VI_ATTR_RD_BUF_OPER_MODE, VI_FLUSH_DISABLE);
-                viRead(vi, (ViBuf) Data_read, 5000*2+10, &retCnt);
-                Data_locate = Data_read[1] - '0' + 2;
-                for(int k=0;k<5000;k++)
-                {
-                    Data_Sum[k] = (Data_read[2*k+ 1 + Data_locate] |(int16_t)(Data_read[2*k+ Data_locate] << 8)) + Data_Sum[k];
-                    //qDebug()<<Data_Sum[j];
-                }
-                viWrite(vi, (ViBuf) "ACQUIRE:STATE RUN", 17, &retCnt);  //run
+                viWrite(vi, (ViBuf) "BUSY?", 5, &retCnt);  //等待
+                viRead(vi, (ViBuf) BUSY, sizeof(BUSY), &retCnt);
+                Sleep(10);
             }
 
+            Sleep(100);
+
+            // 使用顺序的a值
+            a_Qstr = QString::number(a_value, 10);
+            strcpy(u_str, a_Qstr.toLatin1().data());
+            
+        send:
+            mSocket->write("NTT_Pipe");
+            mSocket->write(u_str);
+            mSocket->waitForBytesWritten();
+            //WAIT
+            //BUSY[0] = '1';
+            Busy_cnt = 0;
+            while(BUSY[0] != '0')
+            {
+                viWrite(vi, (ViBuf) "BUSY?", 5, &retCnt);  //等待
+                viRead(vi, (ViBuf) BUSY, sizeof(BUSY), &retCnt);
+                Sleep(10);
+                Busy_cnt ++;
+                if(Busy_cnt == 100) goto send;
+            }
+            viWrite(vi, (ViBuf) "ACQUIRE:STOPAFTER RUNSTop", 25, &retCnt);  //runstop
+
+            //读取数据
+            viWrite(vi, (ViBuf) "CURVE?", 6, &retCnt);  //获取数据
+            viFlush(vi, VI_WRITE_BUF | VI_READ_BUF_DISCARD);
+            viSetAttribute(vi,VI_ATTR_RD_BUF_OPER_MODE, VI_FLUSH_DISABLE);
+            viRead(vi, (ViBuf) Data_read, 5000*2+10, &retCnt);
+            Data_locate = Data_read[1] - '0' + 2;
             for(int k=0;k<5000;k++)
             {
-                Data_Write[k] = Data_Sum[k]/NTT_Pipeline_capture_count;
-                txtOutput << Data_Write[k] << endl;
+                Data_Sum[k] = (Data_read[2*k+ 1 + Data_locate] |(int16_t)(Data_read[2*k+ Data_locate] << 8)) + Data_Sum[k];
+                //qDebug()<<Data_Sum[j];
             }
-            current_date_time =QDateTime::currentDateTime();
-            current_date = current_date_time.toString("dd hh:mm:ss.zzz ddd");
-            qDebug() << current_date;
-            qDebug()<<(i-2)%3329 <<" " <<(j-2)%3329<<endl;
-            f.close();
+            viWrite(vi, (ViBuf) "ACQUIRE:STATE RUN", 17, &retCnt);  //run
         }
-    }
 
+        // 计算平均值并写入文件，格式为: "a的十进制值: 采集值1 采集值2 采集值3..."
+        txtOutput << QString::number(a_value, 10) << ":";
+        for(int k=0;k<5000;k++)
+        {
+            Data_Write[k] = Data_Sum[k]/NTT_Pipeline_capture_count;
+            txtOutput << " " << Data_Write[k];
+        }
+        txtOutput << endl;
+        
+        current_date_time =QDateTime::currentDateTime();
+        current_date = current_date_time.toString("dd hh:mm:ss.zzz ddd");
+        qDebug() << current_date;
+        qDebug() << "Loop" << loop << "Trace " << a_value << ": a=" << a_value << ", b=" << fixed_b;
+    }
+    
+    f.close();
+    qDebug() << "NTT Pipeline Attack completed. 4096 traces saved to ntt_pipeline_traces.txt";
+    }
 }
 
-
-
+/******************************
+ * TEST FUNCTION 4: 
+ *      Sampler_Attack
+******************************/
 void MainWindow::Sampler_Attack()
 {
     qDebug()<<"新客户段连接";
@@ -649,6 +668,10 @@ void MainWindow::Sampler_Attack()
 
 }
 
+/******************************
+ * TEST FUNCTION 5: 
+ *      PWM_Pipeline_Attack
+******************************/
 void MainWindow::PWM_Pipeline_Attack()
 {
     qDebug()<<"新客户段连接";
